@@ -11,7 +11,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "npm run migrate:deploy && node dist/main",
-    "postinstall": "npx prisma generate && npx prisma migrate deploy",
+    "migrate:deploy": "npx prisma generate && npx prisma migrate deploy",
     "lint": "eslint \"src/**/*.ts\" --fix"
   },
   "dependencies": {
