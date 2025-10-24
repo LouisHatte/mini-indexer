@@ -26,15 +26,17 @@ export class IndexerService implements OnModuleInit {
   }
 
   private async runContinuousSync() {
+    const interval = Number(process.env.INDEXER_INTERVAL!);
+
     while (true) {
       try {
         await this.syncTransfers();
         console.log('Sync complete, sleeping for 1 hour...');
       } catch (err) {
         console.error(err);
-        await new Promise((r) => setTimeout(r, 10_000));
+        await new Promise((r) => setTimeout(r, interval));
       }
-      await new Promise((r) => setTimeout(r, 10_000));
+      await new Promise((r) => setTimeout(r, interval));
     }
   }
 
