@@ -1,5 +1,5 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { PrismaClient, Transfer } from '@prisma/client';
 import * as dotenv from 'dotenv';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
@@ -7,7 +7,7 @@ import { mainnet } from 'viem/chains';
 dotenv.config();
 
 @Injectable()
-export class IndexerService implements OnModuleInit {
+export class IndexerService {
   private prisma = new PrismaClient();
   private client = createPublicClient({
     chain: mainnet,
@@ -19,26 +19,6 @@ export class IndexerService implements OnModuleInit {
   private transferAbi = parseAbi([
     'event Transfer(address indexed from, address indexed to, uint256 value)',
   ]);
-
-  onModuleInit() {
-    console.log('Starting continuous indexer...');
-    void this.runContinuousSync();
-  }
-
-  private async runContinuousSync() {
-    const interval = Number(process.env.INDEXER_INTERVAL!);
-
-    while (true) {
-      try {
-        await this.syncTransfers();
-        console.log('Sync complete, sleeping for 1 hour...');
-      } catch (err) {
-        console.error(err);
-        await new Promise((r) => setTimeout(r, interval));
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
-  }
 
   private async getLastCheckpoint() {
     const checkpoint = await this.prisma.checkpoint.findUnique({
@@ -57,58 +37,65 @@ export class IndexerService implements OnModuleInit {
     });
   }
 
-  async syncTransfers() {
-    const fromBlock = await this.getLastCheckpoint();
-    const latestBlock = await this.client.getBlockNumber();
-    const safestBlock = latestBlock - BigInt(process.env.CONFIRMATION_BLOCK!);
-    const step = BigInt(process.env.BATCH_SIZE!);
-    let startBlock = fromBlock;
-    console.log(`Syncing from ${fromBlock} to ${safestBlock}`);
+  private async saveTransfer(transfer: Omit<Transfer, 'id' | 'createdAt'>) {
+    const { txHash, blockNumber, from, to, value } = transfer;
+    await this.prisma.transfer.upsert({
+      where: { txHash },
+      update: {},
+      create: { txHash, blockNumber, from, to, value },
+    });
+  }
 
-    while (startBlock < safestBlock) {
-      const endBlock =
-        startBlock + step >= safestBlock ? safestBlock : startBlock + step;
+  async runOneSync() {
+    console.log('⚙️​ Indexing starting');
 
-      console.log(`Fetching logs from ${startBlock} to ${endBlock}`);
+    try {
+      const fromBlock = await this.getLastCheckpoint();
+      const latestBlock = await this.client.getBlockNumber();
+      const safestBlock = latestBlock - BigInt(process.env.CONFIRMATION_BLOCK!);
 
-      try {
-        const logs = await this.client.getLogs({
-          address: this.tokenAddress,
-          event: this.transferAbi[0],
-          fromBlock: startBlock,
-          toBlock: endBlock,
-        });
-
-        if (logs.length === 0) continue;
-
-        for (const log of logs) {
-          const { from, to, value } = log.args;
-          if (!log.transactionHash) continue;
-
-          await this.prisma.transfer.upsert({
-            where: { txHash: log.transactionHash },
-            update: {},
-            create: {
-              txHash: log.transactionHash,
-              blockNumber: Number(log.blockNumber),
-              from: (from ?? '').toString(),
-              to: (to ?? '').toString(),
-              value: value?.toString() ?? '0',
-            },
-          });
-        }
-
-        startBlock = endBlock + 1n;
-        console.log(`Indexed ${logs.length} transfers`);
-      } catch (err) {
-        console.error(err);
-        startBlock = endBlock + 1n;
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-
-      await new Promise((r) => setTimeout(r, 2000));
+      console.log(`🔸 Syncing from ${fromBlock} to ${safestBlock}`);
+      await this.syncTransfers(fromBlock, safestBlock);
+      console.log(`🔸 Saving checkpoint ${safestBlock + 1n}`);
+      await this.saveCheckpoint(safestBlock + 1n);
+    } catch (err) {
+      console.error('❌ Indexing error', err);
+      return;
     }
 
-    await this.saveCheckpoint(startBlock + 1n);
+    console.log('✅ Indexing complete');
+  }
+
+  private async syncTransfers(firstBlock: bigint, lastBlock: bigint) {
+    const step = BigInt(process.env.BATCH_SIZE!);
+
+    for (let from = firstBlock; from <= lastBlock; from = from + step + 1n) {
+      const to = from + step >= lastBlock ? lastBlock : from + step;
+      console.log(`🔹 Syncing from ${from} to ${to}`);
+
+      const logs = await this.client.getLogs({
+        address: this.tokenAddress,
+        event: this.transferAbi[0],
+        fromBlock: from,
+        toBlock: to,
+      });
+
+      if (logs.length === 0) continue;
+
+      for (const log of logs) {
+        if (!log.transactionHash) continue;
+
+        await this.saveTransfer({
+          txHash: log.transactionHash,
+          blockNumber: Number(log.blockNumber),
+          from: (log.args.from ?? '').toString(),
+          to: (log.args.to ?? '').toString(),
+          value: log.args.value?.toString() ?? '0',
+        });
+      }
+
+      console.log(`🔹 ${logs.length} transfers indexed`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
 }

@@ -8,11 +8,12 @@
   "scripts": {
     "prebuild": "npx prisma generate",
     "build": "nest build",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:prod": "npm run migrate:deploy && node dist/src/main.js",
     "migrate:deploy": "npx prisma generate && npx prisma migrate deploy",
+    "start:prod-api": "npm run migrate:deploy && node dist/src/main.js",
+    "start:prod-indexer": "npm run migrate:deploy && node dist/src/main.js --indexer",
+    "start:dev-api": "nest start --watch",
+    "start:dev-indexer": "nest start --watch -- --indexer",
+    "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint \"src/**/*.ts\" --fix"
   },
   "dependencies": {
