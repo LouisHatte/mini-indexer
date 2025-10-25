@@ -13,6 +13,7 @@ A minimal on-chain indexer that syncs Transfer events for a given ERC-20 token a
 | Language          | TypeScript                           |
 | Framework         | NestJS                               |
 | Database ORM      | Prisma                               |
+| Database          | PostgreSQL                           |
 | RPC               | Infura                               |
 | Blockchain Client | viem                                 |
 | Node Runtime      | Node.js                              |
